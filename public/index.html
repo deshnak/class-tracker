@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Class Tracker</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@0,400;0,500;0,600;0,700;0,800;1,500&family=JetBrains+Mono:wght@400;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="app">
+
+  <header class="topbar">
+    <div class="brand">
+      <div class="brand-mark">CT</div>
+      <div class="brand-text">
+        <span class="brand-name">Class Tracker</span>
+        <span class="brand-sub">Fall 2026 Ledger</span>
+      </div>
+    </div>
+    <nav class="tabs" id="tabs">
+      <button class="tab-btn active" data-tab="dashboard">Dashboard</button>
+      <button class="tab-btn" data-tab="timetable">Timetable</button>
+      <button class="tab-btn" data-tab="courses">Courses</button>
+      <button class="tab-btn" data-tab="grades">Grades</button>
+      <button class="tab-btn" data-tab="settings">Settings</button>
+    </nav>
+    <button id="undoBtn" class="btn small" title="Nothing to undo yet" disabled>&#8630; Undo</button>
+    <button id="darkToggle" class="icon-btn" title="Toggle dark mode">🌙</button>
+  </header>
+
+  <main id="content">
+
+    <!-- DASHBOARD -->
+    <section id="tab-dashboard" class="tab-panel active">
+      <div class="card" id="conflictsCard" style="display:none;">
+        <h2>Canvas Check <span class="tag-optional" id="conflictsCount"></span></h2>
+        <p class="muted">Canvas disagrees with what you've got, or has something you don't - pick which one's right.</p>
+        <div id="conflictsList" class="item-list"></div>
+      </div>
+
+      <div class="stat-row" id="statRow"></div>
+
+      <div class="dash-grid">
+        <div class="card">
+          <div class="card-head">
+            <h2>Due Soon</h2>
+            <div class="seg" id="dueSoonFilter">
+              <button class="seg-btn active" data-days="7">7 days</button>
+              <button class="seg-btn" data-days="14">14 days</button>
+              <button class="seg-btn" data-days="30">30 days</button>
+            </div>
+          </div>
+          <p class="muted">sorted by priority — how much it's worth in your grade + how soon it's due</p>
+          <div id="dueSoonList" class="item-list"></div>
+        </div>
+
+        <div class="card">
+          <h2>Upcoming Exams</h2>
+          <div id="examList" class="item-list"></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>This Week</h2>
+        <div id="todayList" class="item-list"></div>
+      </div>
+
+      <div class="card" id="needsGradeCard" style="display:none;">
+        <h2>Needs Grade Entry</h2>
+        <p class="muted">Past due, no score logged yet — enter these so your grade estimate stays accurate.</p>
+        <div id="needsGradeList" class="item-list"></div>
+      </div>
+
+      <div class="card">
+        <div class="card-head-row" style="margin-bottom:0;">
+          <h2>Notes</h2>
+        </div>
+        <div class="notes-grid" id="notesGrid"></div>
+      </div>
+    </section>
+
+    <!-- TIMETABLE -->
+    <section id="tab-timetable" class="tab-panel">
+      <div class="card">
+        <h2>Weekly Timetable</h2>
+        <div id="timetableGrid" class="timetable"></div>
+        <div id="timetableAsyncNote" class="async-note" style="display:none;"></div>
+      </div>
+    </section>
+
+    <!-- COURSES -->
+    <section id="tab-courses" class="tab-panel">
+      <div class="card-head-row">
+        <h2>Your Courses</h2>
+        <button class="btn primary" id="addCourseBtn">+ Add Course</button>
+      </div>
+      <div id="courseList" class="course-list"></div>
+    </section>
+
+    <!-- GRADES -->
+    <section id="tab-grades" class="tab-panel">
+      <div id="gradesList"></div>
+    </section>
+
+    <!-- SETTINGS -->
+    <section id="tab-settings" class="tab-panel">
+      <div class="card">
+        <h2>Canvas Check <span class="tag-optional">optional</span></h2>
+        <p class="muted">None of these ever overwrite what you've entered and never add a course on their own. They only cross-check the 5 courses already in this app against Canvas: quietly filling in a due date or point value if yours is blank, and putting anything that actually disagrees (or any Canvas assignment you don't have at all) into the Canvas Check card on your Dashboard for you to approve. Classes on your Canvas that aren't in this app are never touched. Use whichever of the three methods below actually works for your Canvas account.</p>
+
+        <div class="subsection">
+          <div class="subsection-head"><h4>Method 1 &middot; Calendar Feed (easiest)</h4></div>
+          <p class="muted">Gets due dates only, no points/weights. Works even if your school has disabled access tokens.</p>
+          <ol class="muted steps">
+            <li>In Canvas, go to Calendar (left sidebar).</li>
+            <li>Click "Calendar Feed" in the bottom-right of the calendar list.</li>
+            <li>Copy the URL it gives you (starts with <code>https://yourschool.instructure.com/feeds/calendars/...</code>) and paste it below.</li>
+          </ol>
+          <label>Calendar Feed URL
+            <input type="text" id="canvasIcsUrl" placeholder="https://yourschool.instructure.com/feeds/calendars/user_xxxxxxxx.ics">
+          </label>
+          <div class="btn-row">
+            <button class="btn primary" id="icsSyncBtn">Check via Calendar Feed</button>
+            <span id="icsSyncStatus" class="muted"></span>
+          </div>
+        </div>
+
+        <div class="subsection">
+          <div class="subsection-head"><h4>Method 2 &middot; Browser Sync (most complete)</h4></div>
+          <p class="muted">Gets due dates, points, AND grading weights, by reading Canvas through your own logged-in browser session &mdash; no token needed. Requires installing the free <a href="https://www.tampermonkey.net/" target="_blank" rel="noopener">Tampermonkey</a> browser extension once.</p>
+          <ol class="muted steps">
+            <li>Install Tampermonkey for your browser (link above), if you haven't already.</li>
+            <li>Click this link, then click "Install" in the Tampermonkey tab that opens: <a href="/canvas-sync.user.js" target="_blank">canvas-sync.user.js</a></li>
+            <li>Open Canvas in a tab (make sure this app is running locally). A pink "&#8635; Sync to Class Tracker" button appears in the bottom-right corner.</li>
+            <li>Click it. Come back to this app and refresh &mdash; anything worth reviewing shows up on your Dashboard.</li>
+          </ol>
+        </div>
+
+        <div class="subsection">
+          <div class="subsection-head"><h4>Method 3 &middot; Access Token</h4></div>
+          <p class="muted">The most direct method, but some schools disable self-service tokens for students &mdash; if step 2 below shows an error about your administrator restricting this, use Method 1 or 2 instead.</p>
+          <ol class="muted steps">
+            <li>Go to Canvas &rarr; Account &rarr; Settings.</li>
+            <li>Scroll to "Approved Integrations" and click "+ New Access Token".</li>
+            <li>Give it any purpose name, leave expiry blank (or set one), click Generate.</li>
+            <li>Copy the token and paste it below. It's stored only in this app's local <code>data/config.json</code> file on your machine &mdash; never sent anywhere except directly to Canvas.</li>
+          </ol>
+          <label>Canvas Base URL
+            <input type="text" id="canvasUrl" placeholder="https://yourschool.instructure.com">
+          </label>
+          <label>Access Token
+            <input type="password" id="canvasToken" placeholder="Paste token here">
+          </label>
+          <div class="btn-row">
+            <button class="btn primary" id="syncBtn">Check Canvas</button>
+            <span id="syncStatus" class="muted"></span>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Notifications</h2>
+        <p class="muted">Get a browser notification for anything due within 24 hours, once per session.</p>
+        <button class="btn" id="notifBtn">Enable Due-Soon Notifications</button>
+      </div>
+
+      <div class="card">
+        <h2>Backup</h2>
+        <p class="muted">Export all your courses and assignments as a JSON file, or restore from one.</p>
+        <div class="btn-row">
+          <button class="btn" id="exportBtn">Export Backup</button>
+          <label class="btn file-btn">Import Backup
+            <input type="file" id="importFile" accept="application/json" style="display:none">
+          </label>
+        </div>
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<div id="modalRoot"></div>
+
+<script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,14 @@
+# Personal data - never commit. The app creates these automatically on first run.
+data/
+
+# Logs
+logs/
+
+# Python
+__pycache__/
+*.pyc
+
+# OS / editor cruft
+.DS_Store
+.vscode/
+.idea/
