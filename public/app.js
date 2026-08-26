@@ -103,7 +103,6 @@ document.getElementById("tabs").addEventListener("click", (e) => {
 });
 
 // ---------- Dark mode ----------
-// Light (the paper ledger) is the default; dark is an opt-in "night ledger" variant.
 function applyTheme() {
   const saved = localStorage.getItem("theme");
   if (saved === "dark") document.documentElement.setAttribute("data-theme", "dark");
@@ -118,9 +117,10 @@ document.getElementById("darkToggle").addEventListener("click", () => {
 applyTheme();
 
 // ---------- Date helpers ----------
-// Parse "YYYY-MM-DD" (or "YYYY-MM-DDTHH:MM:SS") as a LOCAL calendar date.
+// Parse "YYYY-MM-DD" (or "YYYY-MM-DDTHH:MM:SS") as a local calendar date.
 // `new Date("YYYY-MM-DD")` parses as UTC midnight, which rolls back a day in any
-// timezone behind UTC once displayed locally (e.g. a Tue exam shows as Monday) - always go through this.
+// timezone behind UTC once displayed locally (e.g. a Tue exam shows as Monday).
+// Always parse dates through this helper instead of calling `new Date()` directly.
 function parseLocalDate(dateStr) {
   if (!dateStr) return null;
   const [y, m, d] = dateStr.slice(0, 10).split("-").map(Number);
@@ -255,7 +255,7 @@ function renderDashboard() {
   document.getElementById("todayList").innerHTML = todayN.length ? todayN.map(a => itemRow(a)).join("") :
     `<div class="empty-note">Nothing on the calendar this week.</div>`;
 
-  // Past due, points set, but no score logged — the stuff you'll forget to enter once it's graded.
+  // Past due, points set, but no score logged yet - easy to forget once it's actually graded.
   const needsGrade = assignments.filter(a => a.dueDate && daysUntil(a.dueDate) < 0 && a.points != null && a.score == null)
     .sort((a, b) => parseLocalDate(a.dueDate) - parseLocalDate(b.dueDate));
   const needsGradeCard = document.getElementById("needsGradeCard");
@@ -335,9 +335,9 @@ function maybeNotify(dueSoon) {
 const TT_HOUR_PX = 44;
 function renderTimetable() {
   const startHour = 8;
-  // Grid must cover every meeting's actual end time (with an hour of padding), not just a
-  // fixed 9pm cutoff - a class ending at 9:15pm was getting silently dropped entirely because
-  // it didn't fit inside a grid that stopped at 9:00pm.
+  // Grid must cover every meeting's actual end time, plus an hour of padding, instead of a
+  // fixed 9pm cutoff. A class ending at 9:15pm was getting dropped because it didn't fit
+  // inside a grid that stopped at 9:00pm.
   let latestEndHour = 21;
   courses.forEach(c => (c.meetings || []).forEach(m => {
     if (!m.end) return;
@@ -393,8 +393,8 @@ function renderTimetable() {
     });
   });
 
-  // Courses with no fixed meeting time (async/online) don't show up on the grid at all -
-  // list them separately so every class is accounted for somewhere on this page.
+  // Async/online courses have no fixed meeting time, so they never show up on the grid.
+  // List them separately so every class is accounted for somewhere on this page.
   const noMeetingCourses = courses.filter(c => !(c.meetings || []).some(m => m.start && m.end && (m.days || []).length));
   const asyncEl = document.getElementById("timetableAsyncNote");
   if (noMeetingCourses.length) {
@@ -859,7 +859,7 @@ function renderNotes() {
   });
 }
 async function saveNote(n) {
-  // Notes have no PUT endpoint (kept the API small) — delete and re-add with the same id/color.
+  // No PUT endpoint for notes (kept the API small), so delete and re-add with the same id/color.
   await api.del(`/api/notes/${n.id}`);
   const saved = await fetch("/api/notes", {
     method: "POST", headers: { "Content-Type": "application/json" },
@@ -870,8 +870,8 @@ async function saveNote(n) {
 }
 
 // ---------- Undo ----------
-// Site-wide: the server snapshots full state before every mutating request, so Undo just
-// restores the most recent one - works uniformly for any kind of edit, anywhere in the app.
+// The server snapshots full state before every mutating request, so Undo just restores the
+// most recent snapshot. Works the same way for any kind of edit, anywhere in the app.
 async function refreshUndoStatus() {
   const btn = document.getElementById("undoBtn");
   try {

@@ -25,11 +25,10 @@ UNDO_FILE = os.path.join(DATA_DIR, "undo_history.json")
 
 PORT = int(os.environ.get("PORT", "8420"))
 UNDO_MAX = 20
-# Every mutating request snapshots the full state (all 5 data files) before it runs, keyed
-# with a human-readable description. Undo just pops the most recent snapshot and restores
-# every file to it - one mechanism for every kind of edit (course/assignment/note CRUD,
-# conflict resolution, Canvas syncs) instead of bespoke per-action inverse logic, which is
-# far easier to get wrong.
+# Every mutating request snapshots the full state (all 5 data files) first, keyed with a
+# human-readable description. Undo pops the most recent snapshot and restores every file
+# from it. One mechanism covers every kind of edit (courses, assignments, notes, conflict
+# resolution, Canvas syncs) instead of a separate inverse for each action.
 UNDOABLE_FILES = {
     "courses": COURSES_FILE, "assignments": ASSIGNMENTS_FILE, "notes": NOTES_FILE,
     "conflicts": CONFLICTS_FILE, "dismissed": DISMISSED_FILE,
@@ -100,7 +99,7 @@ def normalize_course_key(text):
 
 
 def match_canvas_course(local_code, canvas_courses):
-    """Only ever matches AGAINST an existing local course - never used to create new ones."""
+    """Only matches against an existing local course. Never used to create new ones."""
     key = normalize_course_key(local_code)
     if not key:
         return None
@@ -115,16 +114,15 @@ def normalize_assignment_key(title):
     """Distinguishes assignments for cross-source matching.
 
     HW/Project/Quiz/Exam get a light abbreviation-bridging scheme (so 'Homework 3' matches
-    'HW3'), with the item number pulled from immediately next to the category word - not just
-    the first digit anywhere in the title - so an unrelated leading number can't be mistaken
-    for it (e.g. a course/unit prefix).
+    'HW3'). The item number has to sit right next to the category word, not just be the first
+    digit anywhere in the title, so a leading course/unit prefix number doesn't get mistaken
+    for it.
 
-    Everything else falls back to requiring the FULL cleaned title to match exactly. A fuzzy
-    digit-extraction bucket here previously collapsed 'A1: Process Doc 1' and 'A1: Process Doc
-    2' into the SAME key (both start with 'A1', and the bucket only looked at the first digit
-    in the whole string) - which silently merged two distinct real deliverables into one and
-    deleted the other. Exact-match trades a few missed auto-links for zero false merges, which
-    is the right side to err on here.
+    Everything else falls back to requiring the full cleaned title to match exactly. An earlier
+    version grabbed the first digit anywhere in the title as a fuzzy key, which collapsed 'A1:
+    Process Doc 1' and 'A1: Process Doc 2' into the same key and silently deleted one of them.
+    Exact match trades a few missed auto-links for zero false merges, which is the right
+    tradeoff here.
     """
     clean = re.sub(r"\(.*?\)", "", (title or "").lower())
     clean = re.sub(r"[^a-z0-9]+", " ", clean).strip()
@@ -140,8 +138,8 @@ def normalize_assignment_key(title):
     if m:
         return f"quiz-{m.group(1)}"
     # 'midterm' and 'exam' are specific enough to trust alone, but bare 'final' is a common
-    # English word ('final episode', 'final portfolio') - only treat it as an exam marker when
-    # paired with 'exam', to avoid colliding with unrelated titles that happen to contain it.
+    # English word ('final episode', 'final portfolio'). Only treat it as an exam marker when
+    # it's paired with 'exam', so unrelated titles don't match by accident.
     m = re.search(r"\bmidterm\b\s*#?\s*(\d+[a-z]?)?", clean)
     if m:
         return f"exam-midterm{m.group(1) or ''}"
@@ -155,7 +153,7 @@ def normalize_assignment_key(title):
 
 
 def unescape_ics_text(v):
-    """RFC 5545 TEXT values escape backslash/comma/semicolon/newline - without this, titles
+    """RFC 5545 TEXT values escape backslash/comma/semicolon/newline. Without this, titles
     end up with literal '\\,' in them."""
     if not v:
         return v
@@ -173,12 +171,12 @@ def unescape_ics_text(v):
 
 def clean_canvas_title(raw):
     """Strips the '- Due Friday, 8/28/26, 11:59pm' boilerplate Canvas's calendar feed appends
-    to event titles, so titles stay readable AND so the same assignment normalizes to the same
-    key regardless of which sync method (or which day) pulled it in."""
+    to event titles. Keeps titles readable, and makes sure the same assignment normalizes to
+    the same key no matter which sync method (or which day) pulled it in."""
     t = (raw or "").strip()
-    # Two passes: strip from "Due <weekday>[,] <date>" to the end (whatever precedes "Due" -
-    # "-", "Survey", nothing, etc. all show up in real Canvas feeds), then clean up any
-    # separator left dangling at the new end.
+    # Two passes. First strip everything from "Due <weekday>[,] <date>" onward (real Canvas
+    # feeds put all sorts of things right before "Due": a dash, "Survey", nothing at all).
+    # Then clean up whatever separator is left dangling at the new end.
     t = re.sub(r"\bDue\s+\w+,?\s+\d{1,2}/\d{1,2}/\d{2,4}.*$", "", t, flags=re.I)
     t = re.sub(r"\s*\(\s*due\s+midnight\s*\)\s*$", "", t, flags=re.I)
     t = re.sub(r"[\s\-:]+$", "", t)
@@ -186,11 +184,11 @@ def clean_canvas_title(raw):
 
 
 def canvas_utc_to_local_iso(v):
-    """Canvas's REST API due_at is ISO8601 UTC ('2026-08-29T03:59:00Z') - convert to this
+    """Canvas's REST API due_at is ISO8601 UTC ('2026-08-29T03:59:00Z'). Convert to this
     machine's local time before formatting. Just stripping the 'Z' (the old behavior) silently
-    rolls the calendar date forward by one for any 'due at midnight' assignment, since midnight
-    Eastern is ~4-5am UTC the NEXT day - this was the real cause of the token/browser-sync path
-    disagreeing with the calendar-feed path on the same assignment's due date."""
+    rolled the calendar date forward by one for any 'due at midnight' assignment, since midnight
+    Eastern is around 4-5am UTC the next day. That was the actual cause of the token/browser-sync
+    path disagreeing with the calendar-feed path on the same assignment's due date."""
     if not v:
         return None
     try:
@@ -221,8 +219,8 @@ def assignment_groups_to_items(groups):
 
 
 def reconcile_course_assignments(course, assignments, conflicts, dismissed, canvas_items):
-    """The one place that decides auto-fill vs. conflict vs. new-item, for ANY Canvas data
-    source (token API, calendar feed, or a browser-session push) - they all funnel through here
+    """The one place that decides auto-fill vs. conflict vs. new-item, for any Canvas data
+    source (token API, calendar feed, or a browser-session push). They all funnel through here,
     so the three sync paths can never disagree on what counts as a conflict."""
 
     def is_dismissed(canvas_id, field, canvas_value):
@@ -302,9 +300,8 @@ def reconcile_course_assignments(course, assignments, conflicts, dismissed, canv
 
 
 def do_canvas_crosscheck():
-    """Path A: Canvas Personal Access Token. Blocked for some institutions (e.g. GT can
-    disable self-service tokens) - see do_canvas_ics_crosscheck / do_canvas_push_crosscheck
-    for the workarounds."""
+    """Path A: Canvas Personal Access Token. Some schools disable self-service tokens for
+    students; see do_canvas_ics_crosscheck / do_canvas_push_crosscheck for the workarounds."""
     config = read_json(CONFIG_FILE, {})
     base_url = config.get("canvas_base_url", "").strip()
     token = config.get("canvas_token", "").strip()
@@ -374,7 +371,7 @@ def parse_ics(text):
 
 
 def ics_dt_to_local_iso(v):
-    """Canvas's calendar feed emits UTC timestamps (trailing Z) - convert to this machine's
+    """Canvas's calendar feed emits UTC timestamps (trailing Z). Convert to this machine's
     local time before formatting, so the stored date lines up with how the app displays dates."""
     if not v:
         return None
@@ -415,7 +412,7 @@ def do_canvas_ics_crosscheck():
         url = ev.get("URL", "")
         idm = re.search(r"/(assignments|quizzes|calendar_events)/(\d+)", url)
         # Generic 'calendar_events' aren't gradable assignments (e.g. a course-wide reminder
-        # block) - including them was pulling in junk like "Systems and Networks - CS-2200-A".
+        # block). Including them was pulling in junk like "Systems and Networks - CS-2200-A".
         if idm and idm.group(1) == "calendar_events":
             skipped_calendar_events += 1
             continue
@@ -558,8 +555,8 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(status)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
-        # Allows the Tampermonkey browser-sync userscript (running on canvas.instructure.com)
-        # to POST here directly, in case it isn't using GM_xmlhttpRequest.
+        # Lets the Tampermonkey browser-sync userscript (running on your Canvas domain) POST
+        # here directly, in case it isn't using GM_xmlhttpRequest.
         self.send_header("Access-Control-Allow-Origin", "*")
         self.end_headers()
         self.wfile.write(body)
